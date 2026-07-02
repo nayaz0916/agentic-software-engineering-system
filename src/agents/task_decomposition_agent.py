@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from anthropic import Anthropic
 from src.models import Requirement, Task, TaskStatus
 import os
