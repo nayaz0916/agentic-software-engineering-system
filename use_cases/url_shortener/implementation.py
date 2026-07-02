@@ -14,6 +14,8 @@ import hashlib
 import random
 import string
 from collections import defaultdict
+import os
+from pathlib import Path
 
 
 app = FastAPI(title="URL Shortener Service", version="1.0.0")
@@ -42,8 +44,12 @@ class AnalyticsResponse(BaseModel):
 
 
 # Database setup
+# Get the directory where this script is located
+SCRIPT_DIR = Path(__file__).parent
+DB_PATH = SCRIPT_DIR / 'url_shortener.db'
+
 def get_db():
-    conn = sqlite3.connect('url_shortener.db')
+    conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -80,8 +86,14 @@ def init_db():
     conn.close()
 
 
-# Redis cache
-redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+# Redis cache (optional)
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+    redis_client.ping()
+    REDIS_AVAILABLE = True
+except:
+    REDIS_AVAILABLE = False
+    redis_client = None
 
 
 # Helper functions
@@ -93,6 +105,8 @@ def generate_short_code(length: int = 6) -> str:
 
 def cache_url(short_code: str, original_url: str, ttl: Optional[int] = None):
     """Cache URL in Redis."""
+    if not REDIS_AVAILABLE:
+        return
     if ttl:
         redis_client.setex(f"url:{short_code}", ttl, original_url)
     else:
@@ -101,7 +115,17 @@ def cache_url(short_code: str, original_url: str, ttl: Optional[int] = None):
 
 def get_cached_url(short_code: str) -> Optional[str]:
     """Get URL from cache."""
+    if not REDIS_AVAILABLE:
+        return None
     return redis_client.get(f"url:{short_code}")
+
+
+# Health check (must come before parameterized routes)
+@app.get("/health")
+def health_check():
+    """Health check endpoint."""
+    redis_status = "connected" if REDIS_AVAILABLE else "not connected (optional)"
+    return {"status": "healthy", "redis": redis_status, "database": "connected"}
 
 
 # API Endpoints
@@ -275,17 +299,6 @@ def delete_url(short_code: str):
         raise HTTPException(status_code=404, detail="URL not found")
     
     return {"message": "URL deleted successfully"}
-
-
-# Health check
-@app.get("/health")
-def health_check():
-    """Health check endpoint."""
-    try:
-        redis_client.ping()
-        return {"status": "healthy", "redis": "connected", "database": "connected"}
-    except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
 
 
 if __name__ == "__main__":
